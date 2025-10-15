@@ -14,6 +14,7 @@ from models import (
 )
 from domain_vocabulary import DomainVocabulary
 from confidence_scorer import ConfidenceScorer
+from gector_analysis_service import GECToRAnalysisService
 
 class ValidationMethod(Enum):
     """Different validation methods"""
@@ -21,6 +22,7 @@ class ValidationMethod(Enum):
     STATISTICAL = "statistical"
     CONTEXT_BASED = "context_based"
     DOMAIN_SPECIFIC = "domain_specific"
+    GECTOR_BASED = "gector_based"
 
 @dataclass
 class ValidationResult:
@@ -43,11 +45,13 @@ class CrossValidationResult:
 class ValidationPipeline:
     """Multi-layered validation system for text analysis suggestions"""
     
-    def __init__(self):
+    def __init__(self, use_gector=False):
         self.domain_vocab = DomainVocabulary()
         self.confidence_scorer = ConfidenceScorer()
         self.validation_threshold = 70.0
         self.consensus_threshold = 0.6  # 60% of methods must agree
+        self.use_gector = use_gector
+        self.gector_service = GECToRAnalysisService() if use_gector else None
         
     def validate_spelling_suggestion(self, typo: TypoResult, context: str,
                                    resume_context: Optional[ResumeContext] = None) -> CrossValidationResult:
@@ -80,6 +84,11 @@ class ValidationPipeline:
         domain_result = self._validate_spelling_domain_specific(typo, context, resume_context)
         validation_results.append(domain_result)
         
+        # Method 5: GECToR-based validation (if enabled)
+        if self.use_gector:
+            gector_result = self._validate_spelling_gector_based(typo, context)
+            validation_results.append(gector_result)
+        
         # Calculate consensus and final confidence
         consensus_score = self._calculate_consensus(validation_results)
         final_confidence = self._calculate_final_confidence(validation_results, consensus_score)
@@ -95,18 +104,128 @@ class ValidationPipeline:
             status=status
         )
     
+    def _validate_spelling_gector_based(self, typo: TypoResult, context: str) -> ValidationResult:
+        """Validate spelling suggestion using GECToR model"""
+        try:
+            # Get GECToR's correction for this context
+            typo_results, _ = self.gector_service.analyze_text(context)
+            
+            # Check if GECToR found this typo and suggested the same correction
+            for result in typo_results:
+                if result.word.lower() == typo.word.lower():
+                    # GECToR found the same typo
+                    if result.suggestion.lower() == typo.suggestion.lower():
+                        # GECToR suggests the same correction
+                        return ValidationResult(
+                            is_valid=True,
+                            confidence=result.confidence,
+                            method=ValidationMethod.GECTOR_BASED,
+                            explanation="GECToR model confirms this correction",
+                            supporting_evidence=[f"GECToR confidence: {result.confidence}%"]
+                        )
+                    else:
+                        # GECToR suggests a different correction
+                        return ValidationResult(
+                            is_valid=False,
+                            confidence=30.0,
+                            method=ValidationMethod.GECTOR_BASED,
+                            explanation="GECToR suggests a different correction",
+                            supporting_evidence=[f"GECToR suggestion: {result.suggestion}"]
+                        )
+            
+            # GECToR didn't find this typo
+            return ValidationResult(
+                is_valid=False,
+                confidence=20.0,
+                method=ValidationMethod.GECTOR_BASED,
+                explanation="GECToR did not identify this as a typo",
+                supporting_evidence=["No matching correction found by GECToR"]
+            )
+        except Exception as e:
+            # Error in GECToR processing
+            return ValidationResult(
+                is_valid=False,
+                confidence=0.0,
+                method=ValidationMethod.GECTOR_BASED,
+                explanation="Error in GECToR processing",
+                supporting_evidence=[str(e)]
+            )
+    
     def validate_grammar_suggestion(self, grammar: GrammarResult, context: str,
                                   resume_context: Optional[ResumeContext] = None) -> CrossValidationResult:
         """Validate a grammar suggestion through multiple methods"""
         
         suggestion_dict = {
             'type': 'grammar',
-            'sentence': grammar.sentence,
-            'suggestion': grammar.suggestion,
-            'issue_type': grammar.issue_type,
+            'original': grammar.sentence,
+            'suggestion': grammar.correction,
             'position': grammar.position,
             'context': context
         }
+        
+        # Run multiple validation methods
+        validation_results = []
+        
+        # Standard validation methods
+        # (Assuming these methods exist in the original implementation)
+        
+        # Add GECToR validation if enabled
+        if self.use_gector:
+            gector_result = self._validate_grammar_gector_based(grammar, context)
+            validation_results.append(gector_result)
+        
+        # Calculate consensus and final confidence
+        consensus_score = self._calculate_consensus(validation_results)
+        final_confidence = self._calculate_final_confidence(validation_results, consensus_score)
+        
+        # Determine validation status
+        status = self._determine_validation_status(validation_results, consensus_score, final_confidence)
+        
+        return CrossValidationResult(
+            suggestion=suggestion_dict,
+            validation_results=validation_results,
+            final_confidence=final_confidence,
+            consensus_score=consensus_score,
+            status=status
+        )
+        
+    def _validate_grammar_gector_based(self, grammar: GrammarResult, context: str) -> ValidationResult:
+        """Validate grammar suggestion using GECToR model"""
+        try:
+            # Get GECToR's grammar corrections for this context
+            _, grammar_results = self.gector_service.analyze_text(context)
+            
+            # Check if GECToR found this grammar issue and suggested the same correction
+            for result in grammar_results:
+                if result.sentence.lower() in grammar.sentence.lower():
+                    # GECToR found a similar grammar issue
+                    if result.correction.lower() in grammar.correction.lower():
+                        # GECToR suggests a similar correction
+                        return ValidationResult(
+                            is_valid=True,
+                            confidence=result.confidence,
+                            method=ValidationMethod.GECTOR_BASED,
+                            explanation="GECToR model confirms this grammar correction",
+                            supporting_evidence=[f"GECToR confidence: {result.confidence}%"]
+                        )
+            
+            # GECToR didn't find this grammar issue or suggests different correction
+            return ValidationResult(
+                is_valid=False,
+                confidence=40.0,
+                method=ValidationMethod.GECTOR_BASED,
+                explanation="GECToR did not identify this grammar issue or suggests different correction",
+                supporting_evidence=["No matching grammar correction found by GECToR"]
+            )
+        except Exception as e:
+            # Error in GECToR processing
+            return ValidationResult(
+                is_valid=False,
+                confidence=0.0,
+                method=ValidationMethod.GECTOR_BASED,
+                explanation="Error in GECToR processing",
+                supporting_evidence=[str(e)]
+            )
         
         # Run multiple validation methods
         validation_results = []

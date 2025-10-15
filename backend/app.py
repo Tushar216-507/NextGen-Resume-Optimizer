@@ -5,10 +5,30 @@ from PyPDF2 import PdfReader
 import docx
 from models import AnalyzeRequest, AnalysisResult, ErrorResponse, EnhancedAnalysisResult
 from text_analysis_service import TextAnalysisService
+from enhanced_text_analysis_service import EnhancedTextAnalysisService, EnhancedAnalysisConfig
 
-app = FastAPI(title="Resume Analyzer API", version="1.0.0")
+app = FastAPI(title="Resume Analyzer API", version="2.0.0")
 
-# Initialize integrated text analysis service with enhanced capabilities
+# Initialize both services for backward compatibility and enhanced features
+try:
+    # Enhanced service with world-class accuracy
+    enhanced_config = EnhancedAnalysisConfig(
+        enable_traditional_nlp=True,
+        enable_gector=True,
+        enable_domain_validation=True,
+        confidence_threshold=80.0,
+        max_processing_time=3.0,
+        parallel_processing=True,
+        cache_enabled=True
+    )
+    enhanced_analysis_service = EnhancedTextAnalysisService(enhanced_config)
+    ENHANCED_SERVICE_AVAILABLE = True
+    print("✅ Enhanced analysis service initialized successfully")
+except Exception as e:
+    print(f"⚠️ Enhanced service initialization failed: {e}")
+    ENHANCED_SERVICE_AVAILABLE = False
+
+# Fallback to original service
 analysis_service = TextAnalysisService(enable_enhanced_analysis=True)
 
 # ✅ Setup CORS globally
@@ -88,7 +108,10 @@ async def health_check():
 @app.get("/capabilities")
 async def get_capabilities():
     """Get information about available analysis capabilities"""
-    return analysis_service.get_analysis_capabilities()
+    if ENHANCED_SERVICE_AVAILABLE:
+        return enhanced_analysis_service.get_analysis_capabilities()
+    else:
+        return analysis_service.get_analysis_capabilities()
 
 @app.post("/set_confidence_threshold")
 async def set_confidence_threshold(threshold: float):
@@ -97,10 +120,18 @@ async def set_confidence_threshold(threshold: float):
         if not (0.0 <= threshold <= 100.0):
             raise HTTPException(status_code=400, detail="Threshold must be between 0 and 100")
         
-        analysis_service.set_confidence_threshold(threshold)
+        # Update both services
+        if ENHANCED_SERVICE_AVAILABLE:
+            enhanced_analysis_service.set_confidence_threshold(threshold)
+            new_threshold = enhanced_analysis_service.config.confidence_threshold
+        else:
+            analysis_service.set_confidence_threshold(threshold)
+            new_threshold = analysis_service.confidence_threshold
+        
         return {
             "message": f"Confidence threshold set to {threshold}%",
-            "new_threshold": analysis_service.confidence_threshold
+            "new_threshold": new_threshold,
+            "enhanced_service_used": ENHANCED_SERVICE_AVAILABLE
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to set threshold: {str(e)}")
@@ -126,31 +157,77 @@ async def analyze_resume(request: AnalyzeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
-@app.post("/analyze_resume_enhanced", response_model=EnhancedAnalysisResult)
+@app.post("/analyze_resume_enhanced")
 async def analyze_resume_enhanced(request: AnalyzeRequest):
     """
-    Enhanced text analysis with confidence scoring and context awareness
+    Enhanced text analysis with world-class multi-layer detection
     """
     try:
         if not request.text.strip():
             raise HTTPException(status_code=400, detail="Text cannot be empty")
         
-        # Check if enhanced analysis is available
-        capabilities = analysis_service.get_analysis_capabilities()
-        if not capabilities['enhanced_analysis_available']:
-            raise HTTPException(
-                status_code=503, 
-                detail="Enhanced analysis not available. Missing enhanced components."
+        # Use enhanced service if available
+        if ENHANCED_SERVICE_AVAILABLE:
+            result = enhanced_analysis_service.analyze_text(
+                text=request.text,
+                check_spelling=request.check_spelling,
+                check_grammar=request.check_grammar
             )
-        
-        # Perform enhanced text analysis using integrated service
-        result = analysis_service.analyze_with_confidence(
-            text=request.text,
-            check_spelling=request.check_spelling,
-            check_grammar=request.check_grammar
-        )
-        
-        return result
+            
+            # Convert to API response format
+            return {
+                "typos": [
+                    {
+                        "word": typo.word,
+                        "suggestion": typo.suggestion,
+                        "confidence": typo.confidence_score,
+                        "explanation": typo.explanation,
+                        "context": typo.context,
+                        "position": typo.position,
+                        "validation_status": typo.validation_status,
+                        "layer_results": len(typo.layer_results) if typo.layer_results else 0
+                    } for typo in result.typos
+                ],
+                "grammar_issues": [
+                    {
+                        "sentence": issue.sentence,
+                        "suggestion": issue.suggestion,
+                        "confidence": issue.confidence_score,
+                        "explanation": issue.explanation,
+                        "issue_type": issue.issue_type,
+                        "position": issue.position,
+                        "validation_status": issue.validation_status,
+                        "layer_results": len(issue.layer_results) if issue.layer_results else 0
+                    } for issue in result.grammar_issues
+                ],
+                "summary": {
+                    "total_typos": len(result.typos),
+                    "total_grammar_issues": len(result.grammar_issues),
+                    "processing_time": result.processing_time,
+                    "layers_used": [layer.value for layer in result.layers_used],
+                    "processing_status": result.processing_status.value,
+                    "cache_hits": result.cache_hits,
+                    "total_suggestions": result.total_suggestions,
+                    "high_confidence_issues": result.high_confidence_issues
+                },
+                "analysis_version": "enhanced_v2.0"
+            }
+        else:
+            # Fallback to original enhanced analysis
+            capabilities = analysis_service.get_analysis_capabilities()
+            if not capabilities['enhanced_analysis_available']:
+                raise HTTPException(
+                    status_code=503, 
+                    detail="Enhanced analysis not available. Missing enhanced components."
+                )
+            
+            result = analysis_service.analyze_with_confidence(
+                text=request.text,
+                check_spelling=request.check_spelling,
+                check_grammar=request.check_grammar
+            )
+            
+            return result
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Enhanced analysis failed: {str(e)}")
@@ -290,4 +367,58 @@ async def upload_resume(file: UploadFile = File(...), job_type: str = Form("othe
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources on shutdown"""
-    analysis_service.cleanup()
+    try:
+        if ENHANCED_SERVICE_AVAILABLE:
+            enhanced_analysis_service.cleanup()
+        analysis_service.cleanup()
+        print("✅ System cleanup completed successfully")
+    except Exception as e:
+        print(f"⚠️ Cleanup error: {e}")
+
+@app.get("/system/health")
+async def get_system_health():
+    """Get comprehensive system health information"""
+    try:
+        if ENHANCED_SERVICE_AVAILABLE:
+            return enhanced_analysis_service.validate_system_health()
+        else:
+            return {"status": "basic", "message": "Enhanced service not available"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/system/performance")
+async def get_performance_report():
+    """Get detailed performance report"""
+    try:
+        if ENHANCED_SERVICE_AVAILABLE:
+            return enhanced_analysis_service.get_performance_report()
+        else:
+            return {"message": "Performance reporting requires enhanced service"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get performance report: {str(e)}")
+
+@app.post("/system/optimize")
+async def optimize_system():
+    """Optimize system performance"""
+    try:
+        if ENHANCED_SERVICE_AVAILABLE:
+            result = enhanced_analysis_service.optimize_performance()
+            return {"message": "System optimization completed", "results": result}
+        else:
+            return {"message": "System optimization requires enhanced service"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"System optimization failed: {str(e)}")
+
+@app.get("/system/statistics")
+async def get_system_statistics():
+    """Get comprehensive system statistics"""
+    try:
+        if ENHANCED_SERVICE_AVAILABLE:
+            return enhanced_analysis_service.get_system_statistics()
+        else:
+            return {
+                "service_info": {"version": "basic_v1.0"},
+                "message": "Full statistics require enhanced service"
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get statistics: {str(e)}")

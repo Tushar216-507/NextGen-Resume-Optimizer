@@ -15,6 +15,7 @@ try:
     from context_analyzer import ContextAnalyzer
     from confidence_scorer import ConfidenceScorer
     from validation_pipeline import ValidationPipeline
+    from gector_analysis_service import GECToRAnalysisService
     ENHANCED_COMPONENTS_AVAILABLE = True
 except ImportError:
     ENHANCED_COMPONENTS_AVAILABLE = False
@@ -23,13 +24,14 @@ except ImportError:
 class TextAnalysisService:
     """Service for analyzing text quality including spelling and grammar with enhanced accuracy"""
     
-    def __init__(self, enable_enhanced_analysis: bool = True):
+    def __init__(self, enable_enhanced_analysis: bool = True, use_gector: bool = False):
         self.spell_checker = SpellChecker()
         self.grammar_tool = None  # Initialize lazily for better performance
         
         # Enhanced analysis configuration
         self.enable_enhanced_analysis = enable_enhanced_analysis and ENHANCED_COMPONENTS_AVAILABLE
         self.confidence_threshold = 80.0
+        self.use_gector = use_gector
         
         # Initialize enhanced components if available
         if self.enable_enhanced_analysis:
@@ -37,11 +39,19 @@ class TextAnalysisService:
                 self.domain_vocab = DomainVocabulary()
                 self.context_analyzer = ContextAnalyzer()
                 self.confidence_scorer = ConfidenceScorer()
-                self.validation_pipeline = ValidationPipeline()
+                self.validation_pipeline = ValidationPipeline(use_gector=use_gector)
+                
+                # Initialize GECToR service if enabled
+                if use_gector:
+                    from gector_analysis_service import GECToRAnalysisService
+                    self.gector_service = GECToRAnalysisService()
+                    print("GECToR analysis service initialized successfully")
+                
                 print("Enhanced analysis components initialized successfully")
             except Exception as e:
                 print(f"Failed to initialize enhanced components: {e}")
                 self.enable_enhanced_analysis = False
+                self.use_gector = False
         
         # Add professional/technical terms to custom dictionary
         self._add_professional_terms()
@@ -350,7 +360,11 @@ class TextAnalysisService:
         
         if not self.enable_enhanced_analysis:
             raise RuntimeError("Enhanced analysis components not available")
-        
+            
+        # If GECToR is enabled, use it for analysis
+        if self.use_gector and hasattr(self, 'gector_service'):
+            return self.analyze_with_gector(text, check_spelling, check_grammar)
+            
         start_time = time.time()
         
         # Analyze resume context
@@ -729,6 +743,58 @@ class TextAnalysisService:
         
         return validated_grammar
     
+    def analyze_with_gector(self, text: str, check_spelling: bool = True, 
+                           check_grammar: bool = True) -> EnhancedAnalysisResult:
+        """Analyze text using GECToR model for enhanced accuracy"""
+        if not self.use_gector or not hasattr(self, 'gector_service'):
+            raise ValueError("GECToR analysis is not enabled or service not available")
+        
+        start_time = time.time()
+        
+        # Get GECToR analysis results
+        typos = []
+        grammar_issues = []
+        
+        try:
+            if check_spelling or check_grammar:
+                typos, grammar_issues = self.gector_service.analyze_text(text)
+                
+                # Filter based on what we're checking
+                if not check_spelling:
+                    typos = []
+                if not check_grammar:
+                    grammar_issues = []
+        except Exception as e:
+            print(f"GECToR analysis failed: {e}")
+            # Fall back to standard analysis
+            if check_spelling:
+                typos = self._analyze_spelling_enhanced(text, None)
+            if check_grammar:
+                grammar_issues = self._analyze_grammar_enhanced(text, None)
+        
+        # Calculate metrics
+        processing_time = time.time() - start_time
+        word_count = len(text.split())
+        
+        # Calculate confidence metrics
+        confidence_metrics = self._calculate_confidence_metrics(typos, grammar_issues)
+        
+        # Create enhanced summary
+        summary = EnhancedAnalysisSummary(
+            total_typos=len(typos),
+            total_grammar_issues=len(grammar_issues),
+            word_count=word_count,
+            confidence_metrics=confidence_metrics,
+            context_analysis=None
+        )
+        
+        return EnhancedAnalysisResult(
+            typos=typos,
+            grammar_issues=grammar_issues,
+            summary=summary,
+            processing_time=processing_time
+        )
+        
     def _calculate_confidence_metrics(self, typos: List[ValidatedTypoResult], 
                                     grammar_issues: List[ValidatedGrammarResult]) -> ConfidenceMetrics:
         """Calculate confidence metrics for the analysis"""

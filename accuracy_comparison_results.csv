@@ -1,0 +1,6 @@
+test_case,text,traditional_typo_precision,traditional_typo_recall,traditional_typo_f1,traditional_grammar_precision,traditional_grammar_recall,traditional_grammar_f1,traditional_time,gector_typo_precision,gector_typo_recall,gector_typo_f1,gector_grammar_precision,gector_grammar_recall,gector_grammar_f1,gector_time
+1,I have five years of experence in software developement and machine learnin.,0,0.0,0,0,0.0,0,0.01880931854248047,0.6666666666666666,0.6666666666666666,0.6666666666666666,0,0.0,0,4.384130001068115
+2,Me and my team has completed the project ahead of schedule.,0,0.0,0,0,0.0,0,0.008804798126220703,0.0,0.0,0.0,0,0.0,0,0.6265952587127686
+3,"Proficient in Python, Javascript, and React framwork.",0,0.0,0,0,0.0,0,0.011024236679077148,0.0,0.0,0.0,0,0.0,0,0.6874709129333496
+4,Led a team of 5 developers to delivered the product on time.,0,0.0,0,0,0.0,0,0.008161783218383789,0.0,0.0,0.0,0,0.0,0,0.6712536811828613
+5,Implemented a algoritm for optimizing database querys.,0,0.0,0,0,0.0,0,0.014521598815917969,0.3333333333333333,0.5,0.4,0,0.0,0,0.503162145614624
