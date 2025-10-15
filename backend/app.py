@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import shutil, os
 from PyPDF2 import PdfReader
@@ -23,6 +23,58 @@ app.add_middleware(
 # Directory to store uploads
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+def validate_job_type(job_type: str) -> str:
+    """Validate and sanitize job type parameter"""
+    valid_job_types = {
+        'software_engineer', 'frontend_developer', 'backend_developer', 'full_stack_developer',
+        'mobile_developer', 'data_scientist', 'data_engineer', 'machine_learning_engineer',
+        'devops_engineer', 'cloud_engineer', 'security_engineer', 'qa_engineer',
+        'ui_ux_designer', 'product_manager', 'engineering_manager', 'solutions_architect',
+        'database_administrator', 'other'
+    }
+    
+    if job_type and job_type in valid_job_types:
+        return job_type
+    else:
+        print(f"⚠️ Invalid job type '{job_type}', defaulting to 'other'")
+        return "other"
+
+def calculate_job_specific_bonus(text: str, job_type: str) -> int:
+    """Calculate ATS score bonus based on job-specific keywords and requirements"""
+    text_lower = text.lower()
+    bonus = 0
+    
+    # Technical keywords by job type
+    job_keywords = {
+        'software_engineer': ['python', 'java', 'javascript', 'react', 'node.js', 'git', 'agile', 'api', 'database'],
+        'frontend_developer': ['react', 'vue', 'angular', 'javascript', 'typescript', 'css', 'html', 'responsive', 'ui'],
+        'backend_developer': ['python', 'java', 'node.js', 'api', 'database', 'sql', 'microservices', 'rest', 'graphql'],
+        'full_stack_developer': ['react', 'node.js', 'python', 'javascript', 'api', 'database', 'git', 'agile'],
+        'mobile_developer': ['react native', 'flutter', 'swift', 'kotlin', 'ios', 'android', 'mobile', 'app store'],
+        'data_scientist': ['python', 'r', 'machine learning', 'pandas', 'numpy', 'tensorflow', 'pytorch', 'sql', 'statistics'],
+        'data_engineer': ['python', 'sql', 'spark', 'hadoop', 'etl', 'pipeline', 'aws', 'kafka', 'airflow'],
+        'machine_learning_engineer': ['python', 'tensorflow', 'pytorch', 'scikit-learn', 'mlops', 'docker', 'kubernetes'],
+        'devops_engineer': ['docker', 'kubernetes', 'aws', 'jenkins', 'terraform', 'ansible', 'ci/cd', 'monitoring'],
+        'cloud_engineer': ['aws', 'azure', 'gcp', 'terraform', 'kubernetes', 'docker', 'serverless', 'infrastructure'],
+        'security_engineer': ['cybersecurity', 'penetration testing', 'vulnerability', 'encryption', 'firewall', 'compliance'],
+        'qa_engineer': ['testing', 'automation', 'selenium', 'junit', 'quality assurance', 'bug tracking', 'test cases'],
+        'ui_ux_designer': ['figma', 'sketch', 'adobe', 'user experience', 'wireframes', 'prototyping', 'design systems'],
+        'product_manager': ['product management', 'roadmap', 'stakeholder', 'requirements', 'analytics', 'user stories'],
+        'engineering_manager': ['team lead', 'management', 'mentoring', 'project management', 'technical leadership'],
+        'solutions_architect': ['architecture', 'system design', 'scalability', 'microservices', 'cloud architecture'],
+        'database_administrator': ['sql', 'mysql', 'postgresql', 'mongodb', 'database optimization', 'backup', 'recovery'],
+    }
+    
+    keywords = job_keywords.get(job_type, [])
+    
+    # Count keyword matches
+    for keyword in keywords:
+        if keyword in text_lower:
+            bonus += 2  # 2 points per relevant keyword
+    
+    # Cap bonus at 20 points
+    return min(20, bonus)
 
 @app.get("/")
 async def health_check():
@@ -104,8 +156,13 @@ async def analyze_resume_enhanced(request: AnalyzeRequest):
         raise HTTPException(status_code=500, detail=f"Enhanced analysis failed: {str(e)}")
 
 @app.post("/upload_resume")
-async def upload_resume(file: UploadFile = File(...)):
+async def upload_resume(file: UploadFile = File(...), job_type: str = Form("other")):
     print(f"🔥 RECEIVED FILE: {file.filename}, Size: {file.size}")
+    
+    # Validate and sanitize job type
+    validated_job_type = validate_job_type(job_type)
+    print(f"🎯 JOB TYPE: {validated_job_type}")
+    
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     print(f"📁 Saving to: {file_path}")
 
@@ -163,9 +220,19 @@ async def upload_resume(file: UploadFile = File(...)):
             'processing_time': basic_analysis.processing_time
         })()
     
-    # ✅ Enhanced analysis with quality metrics
+    # ✅ Enhanced analysis with quality metrics and job-specific scoring
+    try:
+        # Calculate job-specific ATS score
+        base_ats_score = 75
+        job_specific_bonus = calculate_job_specific_bonus(text, validated_job_type)
+        final_ats_score = min(100, base_ats_score + job_specific_bonus)
+    except Exception as e:
+        print(f"⚠️ Error in job-specific analysis: {e}, using base score")
+        final_ats_score = 75
+    
     analysis = {
-        "atsScore": 75,  # Keep existing ATS score logic
+        "atsScore": final_ats_score,
+        "jobType": validated_job_type,
         "grammaticalErrors": quality_analysis.summary.total_grammar_issues,
         "typos": quality_analysis.summary.total_typos,
         "missingBlocks": ["Projects", "Certifications"],  # Keep existing logic

@@ -11,20 +11,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:resume_analyzer/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('Resume Analyzer app smoke test', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(ResumeAnalyzerApp());
+    await tester.pumpWidget(const ResumeAnalyzerApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Verify that our app loads correctly
+    expect(find.text('Resume Analyzer'), findsOneWidget);
+    expect(find.text('Upload Your Resume'), findsOneWidget);
+    expect(find.text('Select Target Technical Role'), findsOneWidget);
+    expect(find.text('Select File'), findsOneWidget);
+    expect(find.text('Analyze'), findsOneWidget);
   });
 }
